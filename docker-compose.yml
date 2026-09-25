@@ -1,0 +1,43 @@
+version: '3.8'
+
+networks:
+  app-network:
+    driver: bridge
+
+services:
+  # Container MongoDB với Healthcheck
+  nammongodb:
+    image: mongo:latest
+    container_name: nammongodb
+    ports:
+      - "27017:27017"
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Container Product API với Healthcheck
+  product-api-container:
+    build: .
+    image: product-api:1.0
+    container_name: product-api-container
+    ports:
+      - "3000:3000"
+    networks:
+      - app-network
+    environment:
+      - MONGO_URI=mongodb://nammongodb:27017/product_db
+      - PORT=3000
+    depends_on:
+      nammongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/products"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
