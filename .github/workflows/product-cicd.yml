@@ -1,0 +1,138 @@
+name: Product CI CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: product-cicd-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci-cd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      mongodb:
+        image: mongo:8
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'quit(db.adminCommand({ping:1}).ok ? 0 : 1)'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+          --health-start-period 10s
+
+    env:
+      NODE_ENV: test
+      MONGO_URI: mongodb://127.0.0.1:27017/productdb_ci_test
+      LOCAL_IMAGE: product-api:ci
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run basic tests
+        run: npm run test:basic
+
+      - name: Run CRUD tests
+        run: npm run test:prod
+
+      - name: Build production image
+        run: docker build -t "$LOCAL_IMAGE" .
+
+      - name: Start API container
+        run: |
+          docker run -d \
+            --name product-api-ci \
+            --network host \
+            -e NODE_ENV=production \
+            -e HOST=127.0.0.1 \
+            -e PORT=3000 \
+            -e MONGO_URI="$MONGO_URI" \
+            "$LOCAL_IMAGE"
+
+      - name: Check API and MongoDB health
+        shell: bash
+        run: |
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error \
+              --max-time 3 \
+              http://127.0.0.1:3000/health \
+              -o /tmp/product-health.json; then
+
+              if node -e "
+                const fs = require('fs');
+                const health = JSON.parse(
+                  fs.readFileSync('/tmp/product-health.json', 'utf8')
+                );
+                if (
+                  health.status !== 'ok' ||
+                  health.database !== 'connected'
+                ) {
+                  process.exit(1);
+                }
+              "; then
+                echo "Healthcheck passed"
+                cat /tmp/product-health.json
+                exit 0
+              fi
+            fi
+
+            echo "Waiting for API: attempt $attempt/30"
+            sleep 2
+          done
+
+          echo "Healthcheck failed"
+          exit 1
+
+      - name: Login to Docker Hub
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push tested image
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          IMAGE="$DOCKERHUB_USERNAME/product-api"
+
+          docker tag "$LOCAL_IMAGE" "$IMAGE:$GITHUB_SHA"
+          docker tag "$LOCAL_IMAGE" "$IMAGE:latest"
+
+          docker push "$IMAGE:$GITHUB_SHA"
+          docker push "$IMAGE:latest"
+
+      - name: Show logs on failure
+        if: failure()
+        env:
+          MONGO_CONTAINER_ID: ${{ job.services.mongodb.id }}
+        run: |
+          docker logs product-api-ci || true
+          if [ -n "$MONGO_CONTAINER_ID" ]; then
+            docker logs "$MONGO_CONTAINER_ID" || true
+          fi
+
+      - name: Clean up API container
+        if: always()
+        run: docker rm -f product-api-ci || true
