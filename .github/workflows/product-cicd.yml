@@ -187,3 +187,55 @@ jobs:
         if: always()
         run: |
           docker rm -f product-api-ci || true
+
+  deploy-local:
+    name: Deploy to local Docker Engine
+    needs: ci-cd
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.ENABLE_LOCAL_CD == 'true'
+    runs-on: [self-hosted, Windows, X64, product-api-local]
+    timeout-minutes: 10
+    concurrency:
+      group: product-api-local
+      cancel-in-progress: false
+    defaults:
+      run:
+        shell: powershell
+    env:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      IMAGE_TAG: ${{ github.sha }}
+      PORT: '3000'
+    steps:
+      - name: Checkout deployment configuration
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Check Docker Desktop
+        run: |
+          docker version
+          if ($LASTEXITCODE -ne 0) { throw 'Start Docker Desktop using the runner Windows account' }
+          docker compose version
+          if ($LASTEXITCODE -ne 0) { throw 'Docker Compose v2 is required' }
+          if (-not $env:DOCKERHUB_USERNAME) { throw 'DOCKERHUB_USERNAME secret is required' }
+
+      # The Docker Hub repository is public; no Docker Hub token is needed locally.
+      # An explicit project name reuses the existing containers and MongoDB volume.
+      - name: Pull the image published by this commit
+        run: |
+          docker compose -p product-api-prod -f docker-compose-prod.yaml pull
+          if ($LASTEXITCODE -ne 0) { throw 'Image pull failed' }
+
+      - name: Update containers and require healthy status
+        run: |
+          docker compose -p product-api-prod -f docker-compose-prod.yaml up -d --wait --wait-timeout 180
+          if ($LASTEXITCODE -ne 0) { throw 'Deployment or container healthcheck failed' }
+          $health = Invoke-RestMethod -Uri 'http://127.0.0.1:3000/health' -TimeoutSec 10
+          if ($health.status -ne 'ok' -or $health.database -ne 'connected') {
+            throw 'API cannot connect to MongoDB'
+          }
+          docker compose -p product-api-prod -f docker-compose-prod.yaml ps
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect deployed containers' }
+
+      - name: Show deployment logs on failure
+        if: failure()
+        run: docker compose -p product-api-prod -f docker-compose-prod.yaml logs --tail 100
