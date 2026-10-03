@@ -37,27 +37,48 @@ jobs:
       LOCAL_IMAGE: product-api:ci
 
     steps:
+      # ==============================
+      # 1. Checkout
+      # ==============================
       - name: Checkout source code
         uses: actions/checkout@v6
 
+      # ==============================
+      # 2. Setup Node.js
+      # ==============================
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: npm
 
+      # ==============================
+      # 3. Install dependencies
+      # ==============================
       - name: Install dependencies
         run: npm ci
 
+      # ==============================
+      # 4. Basic tests
+      # ==============================
       - name: Run basic tests
         run: npm run test:basic
 
+      # ==============================
+      # 5. CRUD tests
+      # ==============================
       - name: Run CRUD tests
         run: npm run test:prod
 
+      # ==============================
+      # 6. Build Docker image
+      # ==============================
       - name: Build production image
         run: docker build -t "$LOCAL_IMAGE" .
 
+      # ==============================
+      # 7. Start API container
+      # ==============================
       - name: Start API container
         run: |
           docker run -d \
@@ -69,6 +90,9 @@ jobs:
             -e MONGO_URI="$MONGO_URI" \
             "$LOCAL_IMAGE"
 
+      # ==============================
+      # 8. Check API and MongoDB health
+      # ==============================
       - name: Check API and MongoDB health
         shell: bash
         run: |
@@ -80,9 +104,11 @@ jobs:
 
               if node -e "
                 const fs = require('fs');
+
                 const health = JSON.parse(
                   fs.readFileSync('/tmp/product-health.json', 'utf8')
                 );
+
                 if (
                   health.status !== 'ok' ||
                   health.database !== 'connected'
@@ -90,6 +116,7 @@ jobs:
                   process.exit(1);
                 }
               "; then
+
                 echo "Healthcheck passed"
                 cat /tmp/product-health.json
                 exit 0
@@ -103,13 +130,22 @@ jobs:
           echo "Healthcheck failed"
           exit 1
 
+      # ==============================
+      # 9. Login Docker Hub
+      # ==============================
       - name: Login to Docker Hub
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        uses: docker/login-action@v4
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          echo "$DOCKERHUB_TOKEN" | docker login \
+            --username "$DOCKERHUB_USERNAME" \
+            --password-stdin
 
+      # ==============================
+      # 10. Push Docker image
+      # ==============================
       - name: Push tested image
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
@@ -117,22 +153,37 @@ jobs:
         run: |
           IMAGE="$DOCKERHUB_USERNAME/product-api"
 
+          echo "Tagging image: $IMAGE"
+
           docker tag "$LOCAL_IMAGE" "$IMAGE:$GITHUB_SHA"
           docker tag "$LOCAL_IMAGE" "$IMAGE:latest"
 
+          echo "Pushing image: $IMAGE:$GITHUB_SHA"
           docker push "$IMAGE:$GITHUB_SHA"
+
+          echo "Pushing image: $IMAGE:latest"
           docker push "$IMAGE:latest"
 
+      # ==============================
+      # 11. Show logs if failed
+      # ==============================
       - name: Show logs on failure
         if: failure()
         env:
           MONGO_CONTAINER_ID: ${{ job.services.mongodb.id }}
         run: |
+          echo "===== Product API logs ====="
           docker logs product-api-ci || true
+
+          echo "===== MongoDB logs ====="
           if [ -n "$MONGO_CONTAINER_ID" ]; then
             docker logs "$MONGO_CONTAINER_ID" || true
           fi
 
+      # ==============================
+      # 12. Clean up
+      # ==============================
       - name: Clean up API container
         if: always()
-        run: docker rm -f product-api-ci || true
+        run: |
+          docker rm -f product-api-ci || true
