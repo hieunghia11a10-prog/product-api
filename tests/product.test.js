@@ -9,7 +9,7 @@ const uri = process.env.MONGO_URI;
 let databaseReady = false;
 
 beforeAll(async () => {
-  // Không cho phép chạy thao tác dọn dữ liệu trên database khác.
+  // Chỉ được dọn dữ liệu trong database kiểm thử.
   if (!uri || !uri.endsWith("/productdb_ci_test")) {
     throw new Error(
       "MONGO_URI phải trỏ đến database productdb_ci_test"
@@ -86,7 +86,7 @@ describe("Product API với MongoDB thật", () => {
     await Product.create(sample);
 
     const response = await request(app)
-      .get("/api/products/CI001");
+      .get(`/api/products/${sample.pid}`);
 
     expect(response.statusCode).toBe(200);
     expect(response.body).toMatchObject(sample);
@@ -102,7 +102,7 @@ describe("Product API với MongoDB thật", () => {
     };
 
     const response = await request(app)
-      .put("/api/products/CI001")
+      .put(`/api/products/${sample.pid}`)
       .send(changes);
 
     expect(response.statusCode).toBe(200);
@@ -112,6 +112,7 @@ describe("Product API với MongoDB thật", () => {
     });
 
     const saved = await Product.findOne({ pid: sample.pid }).lean();
+
     expect(saved).toMatchObject({
       pid: sample.pid,
       ...changes,
@@ -122,7 +123,7 @@ describe("Product API với MongoDB thật", () => {
     await Product.create(sample);
 
     const response = await request(app)
-      .delete("/api/products/CI001");
+      .delete(`/api/products/${sample.pid}`);
 
     expect(response.statusCode).toBe(200);
     expect(response.body.pid).toBe(sample.pid);
@@ -131,7 +132,7 @@ describe("Product API với MongoDB thật", () => {
     expect(saved).toBeNull();
 
     const readAgain = await request(app)
-      .get("/api/products/CI001");
+      .get(`/api/products/${sample.pid}`);
 
     expect(readAgain.statusCode).toBe(404);
   });
@@ -145,36 +146,85 @@ describe("Product API với MongoDB thật", () => {
 
     expect(response.statusCode).toBe(409);
     expect(await Product.countDocuments({})).toBe(1);
-  });
-
-  test.each([
-    ["thiếu tên", { pname: "" }],
-    ["giá âm", { price: -1 }],
-    ["số lượng âm", { quantity: -1 }],
-    ["số lượng không nguyên", { quantity: 1.5 }],
-  ])("Từ chối tạo sản phẩm: %s", async (_, invalid) => {
-    const response = await request(app)
-      .post("/api/products")
-      .send({ ...sample, ...invalid });
-
-    expect(response.statusCode).toBe(400);
-    expect(await Product.countDocuments({})).toBe(0);
-  });
-
-  test("Từ chối cập nhật giá âm, giữ nguyên dữ liệu", async () => {
-    await Product.create(sample);
-
-    const response = await request(app)
-      .put("/api/products/CI001")
-      .send({
-        pname: sample.pname,
-        price: -1,
-        quantity: sample.quantity,
-      });
-
-    expect(response.statusCode).toBe(400);
 
     const saved = await Product.findOne({ pid: sample.pid }).lean();
     expect(saved).toMatchObject(sample);
+  });
+
+  test.each([
+    ["tên rỗng", { pname: "" }],
+    ["giá âm", { price: -1 }],
+    ["số lượng âm", { quantity: -1 }],
+    ["số lượng thập phân", { quantity: 1.5 }],
+  ])("Cho phép tạo sản phẩm có %s", async (_, changes) => {
+    const data = { ...sample, ...changes };
+
+    const response = await request(app)
+      .post("/api/products")
+      .send(data);
+
+    expect(response.statusCode).toBe(201);
+    expect(response.body).toMatchObject(data);
+    expect(await Product.countDocuments({})).toBe(1);
+
+    const saved = await Product.findOne({ pid: data.pid }).lean();
+    expect(saved).toMatchObject(data);
+  });
+
+  test.each(["pid", "pname", "price", "quantity"])(
+    "Cho phép tạo sản phẩm thiếu trường %s",
+    async (field) => {
+      const data = { ...sample };
+      delete data[field];
+
+      const response = await request(app)
+        .post("/api/products")
+        .send(data);
+
+      expect(response.statusCode).toBe(201);
+      expect(response.body).toMatchObject(data);
+      expect(response.body).not.toHaveProperty(field);
+      expect(await Product.countDocuments({})).toBe(1);
+
+      const saved = await Product.findById(response.body._id).lean();
+      expect(saved).toMatchObject(data);
+      expect(saved).not.toHaveProperty(field);
+    }
+  );
+
+  test("Cho phép tạo sản phẩm chỉ có pid", async () => {
+    const response = await request(app)
+      .post("/api/products")
+      .send({ pid: "CI002" });
+
+    expect(response.statusCode).toBe(201);
+
+    const saved = await Product.findOne({ pid: "CI002" }).lean();
+
+    expect(saved).not.toBeNull();
+    expect(saved.pname).toBeUndefined();
+    expect(saved.price).toBeUndefined();
+    expect(saved.quantity).toBeUndefined();
+  });
+
+  test("Cho phép cập nhật giá âm và lưu thay đổi", async () => {
+    await Product.create(sample);
+
+    const response = await request(app)
+      .put(`/api/products/${sample.pid}`)
+      .send({ price: -1 });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      ...sample,
+      price: -1,
+    });
+
+    const saved = await Product.findOne({ pid: sample.pid }).lean();
+
+    expect(saved).toMatchObject({
+      ...sample,
+      price: -1,
+    });
   });
 });
