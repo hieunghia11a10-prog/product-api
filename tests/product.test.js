@@ -68,7 +68,10 @@ describe("Product API với MongoDB thật", () => {
     expect(response.statusCode).toBe(201);
     expect(response.body).toMatchObject(sample);
 
-    const saved = await Product.findOne({ pid: sample.pid }).lean();
+    const saved = await Product.findOne({
+      pid: sample.pid,
+    }).lean();
+
     expect(saved).toMatchObject(sample);
   });
 
@@ -111,7 +114,9 @@ describe("Product API với MongoDB thật", () => {
       ...changes,
     });
 
-    const saved = await Product.findOne({ pid: sample.pid }).lean();
+    const saved = await Product.findOne({
+      pid: sample.pid,
+    }).lean();
 
     expect(saved).toMatchObject({
       pid: sample.pid,
@@ -147,7 +152,10 @@ describe("Product API với MongoDB thật", () => {
     expect(response.statusCode).toBe(409);
     expect(await Product.countDocuments({})).toBe(1);
 
-    const saved = await Product.findOne({ pid: sample.pid }).lean();
+    const saved = await Product.findOne({
+      pid: sample.pid,
+    }).lean();
+
     expect(saved).toMatchObject(sample);
   });
 
@@ -167,7 +175,10 @@ describe("Product API với MongoDB thật", () => {
     expect(response.body).toMatchObject(data);
     expect(await Product.countDocuments({})).toBe(1);
 
-    const saved = await Product.findOne({ pid: data.pid }).lean();
+    const saved = await Product.findOne({
+      pid: data.pid,
+    }).lean();
+
     expect(saved).toMatchObject(data);
   });
 
@@ -186,7 +197,10 @@ describe("Product API với MongoDB thật", () => {
       expect(response.body).not.toHaveProperty(field);
       expect(await Product.countDocuments({})).toBe(1);
 
-      const saved = await Product.findById(response.body._id).lean();
+      const saved = await Product.findById(
+        response.body._id
+      ).lean();
+
       expect(saved).toMatchObject(data);
       expect(saved).not.toHaveProperty(field);
     }
@@ -199,7 +213,9 @@ describe("Product API với MongoDB thật", () => {
 
     expect(response.statusCode).toBe(201);
 
-    const saved = await Product.findOne({ pid: "CI002" }).lean();
+    const saved = await Product.findOne({
+      pid: "CI002",
+    }).lean();
 
     expect(saved).not.toBeNull();
     expect(saved.pname).toBeUndefined();
@@ -210,21 +226,30 @@ describe("Product API với MongoDB thật", () => {
   test("Cho phép cập nhật giá âm và lưu thay đổi", async () => {
     await Product.create(sample);
 
+    // PUT yêu cầu đủ pname, price và quantity.
+    const changes = {
+      pname: sample.pname,
+      price: -1,
+      quantity: sample.quantity,
+    };
+
     const response = await request(app)
       .put(`/api/products/${sample.pid}`)
-      .send({ price: -1 });
+      .send(changes);
 
     expect(response.statusCode).toBe(200);
     expect(response.body).toMatchObject({
-      ...sample,
-      price: -1,
+      pid: sample.pid,
+      ...changes,
     });
 
-    const saved = await Product.findOne({ pid: sample.pid }).lean();
+    const saved = await Product.findOne({
+      pid: sample.pid,
+    }).lean();
 
     expect(saved).toMatchObject({
-      ...sample,
-      price: -1,
+      pid: sample.pid,
+      ...changes,
     });
   });
 });
