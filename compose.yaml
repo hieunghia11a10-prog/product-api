@@ -4,8 +4,6 @@ services:
   mongodb:
     image: mongo:8
     container_name: nammongodb
-    ports:
-      - "127.0.0.1:27017:27017"
     volumes:
       - mongodb_data:/data/db
       - mongodb_config:/data/configdb
@@ -27,6 +25,10 @@ services:
     container_name: product-api
     env_file:
       - .env.docker
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "3000"
+      MONGO_URI: "mongodb://mongodb:27017/productdb"
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:

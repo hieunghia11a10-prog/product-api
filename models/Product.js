@@ -1,36 +1,10 @@
 const mongoose = require("mongoose");
 
-const productSchema = new mongoose.Schema(
-  {
-    pid: {
-      type: String,
-      required: true,
-      unique: true,
-      trim: true,
-    },
-    pname: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-    price: {
-      type: Number,
-      required: true,
-      min: 0,
-    },
-    quantity: {
-      type: Number,
-      required: true,
-      min: 0,
-      validate: {
-        validator: Number.isInteger,
-        message: "quantity phải là số nguyên",
-      },
-    },
-  },
-  {
-    timestamps: true,
-  }
-);
+const productSchema = new mongoose.Schema({
+  pid: { type: String, required: false, unique: true },
+  pname: { type: String, required: false },
+  price: { type: Number, required: false },
+  quantity: { type: Number, required: false },
+});
 
 module.exports = mongoose.model("Product", productSchema);
