@@ -4,8 +4,10 @@ services:
   nammongodb:
     image: mongo:8.0
     restart: unless-stopped
+
     volumes:
       - mongo-data:/data/db
+
     healthcheck:
       test:
         [
@@ -22,17 +24,19 @@ services:
 
   product-api:
     container_name: product-api
-    image: ${DOCKERHUB_USERNAME:?Set DOCKERHUB_USERNAME in .env}/product-api:${IMAGE_TAG:-latest}
+
+    image: ${DOCKERHUB_USERNAME:?Set DOCKERHUB_USERNAME}/product-api:${IMAGE_TAG:-latest}
+
     restart: unless-stopped
 
     ports:
       - "127.0.0.1:${PORT:-3001}:3000"
 
     environment:
-      HOST: 0.0.0.0
-      PORT: 3000
-      NODE_ENV: production
-      MONGO_URI: mongodb://nammongodb:27017/productdb
+      HOST: "0.0.0.0"
+      PORT: "3000"
+      NODE_ENV: "production"
+      MONGO_URI: "mongodb://nammongodb:27017/productdb"
 
     depends_on:
       nammongodb:
