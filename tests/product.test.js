@@ -8,8 +8,15 @@ jest.setTimeout(30000);
 const uri = process.env.MONGO_URI;
 let databaseReady = false;
 
+const sample = {
+  pid: "CI001",
+  pname: "Ban phim",
+  price: 350000,
+  quantity: 10,
+};
+
 beforeAll(async () => {
-  // Chỉ được dọn dữ liệu trong database kiểm thử.
+  // Bảo vệ dữ liệu: chỉ chạy trên database kiểm thử.
   if (!uri || !uri.endsWith("/productdb_ci_test")) {
     throw new Error(
       "MONGO_URI phải trỏ đến database productdb_ci_test"
@@ -42,15 +49,8 @@ afterAll(async () => {
   }
 });
 
-const sample = {
-  pid: "CI001",
-  pname: "Ban phim",
-  price: 350000,
-  quantity: 10,
-};
-
 describe("Product API với MongoDB thật", () => {
-  test("Health trả về kết nối MongoDB thành công", async () => {
+  test("Health: kết nối MongoDB thành công", async () => {
     const response = await request(app).get("/health");
 
     expect(response.statusCode).toBe(200);
@@ -60,7 +60,7 @@ describe("Product API với MongoDB thật", () => {
     });
   });
 
-  test("CREATE: tạo sản phẩm và lưu vào MongoDB", async () => {
+  test("CREATE: tạo và lưu sản phẩm", async () => {
     const response = await request(app)
       .post("/api/products")
       .send(sample);
@@ -92,9 +92,10 @@ describe("Product API với MongoDB thật", () => {
     expect(response.body).toMatchObject(sample);
   });
 
-  test("UPDATE: sửa sản phẩm và lưu thay đổi", async () => {
+  test("UPDATE: cập nhật và lưu thay đổi", async () => {
     await Product.create(sample);
 
+    // PUT hiện tại yêu cầu đủ ba trường.
     const changes = {
       pname: "Ban phim co",
       price: 500000,
@@ -105,21 +106,16 @@ describe("Product API với MongoDB thật", () => {
       .put(`/api/products/${sample.pid}`)
       .send(changes);
 
+    const expected = { pid: sample.pid, ...changes };
+
     expect(response.statusCode).toBe(200);
-    expect(response.body).toMatchObject({
-      pid: sample.pid,
-      ...changes,
-    });
+    expect(response.body).toMatchObject(expected);
 
     const saved = await Product.findOne({ pid: sample.pid }).lean();
-
-    expect(saved).toMatchObject({
-      pid: sample.pid,
-      ...changes,
-    });
+    expect(saved).toMatchObject(expected);
   });
 
-  test("DELETE: xóa sản phẩm khỏi MongoDB", async () => {
+  test("DELETE: xóa sản phẩm", async () => {
     await Product.create(sample);
 
     const response = await request(app)
@@ -127,9 +123,7 @@ describe("Product API với MongoDB thật", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.body.pid).toBe(sample.pid);
-
-    const saved = await Product.findOne({ pid: sample.pid });
-    expect(saved).toBeNull();
+    expect(await Product.findOne({ pid: sample.pid })).toBeNull();
 
     const readAgain = await request(app)
       .get(`/api/products/${sample.pid}`);
@@ -137,7 +131,7 @@ describe("Product API với MongoDB thật", () => {
     expect(readAgain.statusCode).toBe(404);
   });
 
-  test("Không cho phép tạo trùng pid", async () => {
+  test("Từ chối tạo trùng pid", async () => {
     await Product.create(sample);
 
     const response = await request(app)
@@ -151,9 +145,47 @@ describe("Product API với MongoDB thật", () => {
     expect(saved).toMatchObject(sample);
   });
 
-  // Schema không bắt buộc tên và không giới hạn số âm, số thập phân.
+  // Theo schema hiện tại: pid, price, quantity không bắt buộc.
+  test.each(["pid", "price", "quantity"])(
+    "Cho phép thiếu trường %s",
+    async (field) => {
+      const data = { ...sample };
+      delete data[field];
+
+      const response = await request(app)
+        .post("/api/products")
+        .send(data);
+
+      expect(response.statusCode).toBe(201);
+      expect(response.body).toMatchObject(data);
+      expect(response.body).not.toHaveProperty(field);
+      expect(await Product.countDocuments({})).toBe(1);
+
+      const saved = await Product.findById(response.body._id).lean();
+      expect(saved).toMatchObject(data);
+      expect(saved).not.toHaveProperty(field);
+    }
+  );
+
+  // pname là trường bắt buộc.
   test.each([
-    ["tên rỗng", { pname: "" }],
+    ["tên rỗng", { ...sample, pname: "" }],
+    [
+      "thiếu pname",
+      { pid: "CI002", price: 100, quantity: 2 },
+    ],
+    ["chỉ có pid", { pid: "CI003" }],
+  ])("Từ chối tạo sản phẩm: %s", async (_, data) => {
+    const response = await request(app)
+      .post("/api/products")
+      .send(data);
+
+    expect(response.statusCode).toBe(400);
+    expect(await Product.countDocuments({})).toBe(0);
+  });
+
+  // Schema không giới hạn số âm hoặc số thập phân.
+  test.each([
     ["giá âm", { price: -1 }],
     ["số lượng âm", { quantity: -1 }],
     ["số lượng thập phân", { quantity: 1.5 }],
@@ -172,54 +204,9 @@ describe("Product API với MongoDB thật", () => {
     expect(saved).toMatchObject(data);
   });
 
-  // Ba trường không bắt buộc.
-  test.each(["pid", "pname", "price"])(
-    "Cho phép tạo sản phẩm thiếu trường %s",
-    async (field) => {
-      const data = { ...sample };
-      delete data[field];
-
-      const response = await request(app)
-        .post("/api/products")
-        .send(data);
-
-      expect(response.statusCode).toBe(201);
-      expect(response.body).toMatchObject(data);
-      expect(response.body).not.toHaveProperty(field);
-      expect(await Product.countDocuments({})).toBe(1);
-
-      const saved = await Product.findById(response.body._id).lean();
-
-      expect(saved).toMatchObject(data);
-      expect(saved).not.toHaveProperty(field);
-    }
-  );
-
-  test("Từ chối tạo sản phẩm thiếu quantity", async () => {
-    const data = { ...sample };
-    delete data.quantity;
-
-    const response = await request(app)
-      .post("/api/products")
-      .send(data);
-
-    expect(response.statusCode).toBe(400);
-    expect(await Product.countDocuments({})).toBe(0);
-  });
-
-  test("Từ chối tạo sản phẩm chỉ có pid", async () => {
-    const response = await request(app)
-      .post("/api/products")
-      .send({ pid: "CI002" });
-
-    expect(response.statusCode).toBe(400);
-    expect(await Product.countDocuments({})).toBe(0);
-  });
-
-  test("Cho phép cập nhật giá âm và lưu thay đổi", async () => {
+  test("Cho phép cập nhật giá âm", async () => {
     await Product.create(sample);
 
-    // Route PUT vẫn yêu cầu đủ pname, price và quantity.
     const changes = {
       pname: sample.pname,
       price: -1,
@@ -230,17 +217,12 @@ describe("Product API với MongoDB thật", () => {
       .put(`/api/products/${sample.pid}`)
       .send(changes);
 
+    const expected = { pid: sample.pid, ...changes };
+
     expect(response.statusCode).toBe(200);
-    expect(response.body).toMatchObject({
-      pid: sample.pid,
-      ...changes,
-    });
+    expect(response.body).toMatchObject(expected);
 
     const saved = await Product.findOne({ pid: sample.pid }).lean();
-
-    expect(saved).toMatchObject({
-      pid: sample.pid,
-      ...changes,
-    });
+    expect(saved).toMatchObject(expected);
   });
 });
