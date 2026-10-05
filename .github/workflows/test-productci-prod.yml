@@ -3,8 +3,10 @@ name: Test Product CI Prod and CD
 on:
   push:
     branches: [main]
+
   pull_request:
     branches: [main]
+
   workflow_dispatch:
 
 permissions:
@@ -14,10 +16,13 @@ concurrency:
   group: product-cicd-${{ github.ref }}
   cancel-in-progress: false
 
+
+# =========================================================
+# CI
+# TEST -> BUILD -> HEALTHCHECK -> PUSH DOCKER HUB
+# =========================================================
+
 jobs:
-  # =========================================================
-  # CI: TEST -> BUILD -> HEALTHCHECK -> PUSH DOCKER HUB
-  # =========================================================
   ci-cd:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -27,6 +32,7 @@ jobs:
         image: mongo:8
         ports:
           - 27017:27017
+
         options: >-
           --health-cmd "mongosh --quiet --eval 'quit(db.adminCommand({ping:1}).ok ? 0 : 1)'"
           --health-interval 5s
@@ -44,45 +50,58 @@ jobs:
       # =====================================================
       # 1. Checkout
       # =====================================================
+
       - name: Checkout source code
         uses: actions/checkout@v6
+
 
       # =====================================================
       # 2. Setup Node.js
       # =====================================================
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: npm
 
+
       # =====================================================
       # 3. Install dependencies
       # =====================================================
+
       - name: Install dependencies
         run: npm ci
+
 
       # =====================================================
       # 4. Basic tests
       # =====================================================
+
       - name: Run basic tests
         run: npm run test:basic
+
 
       # =====================================================
       # 5. CRUD / MongoDB integration tests
       # =====================================================
+
       - name: Run CRUD tests
         run: npm run test:prod
+
 
       # =====================================================
       # 6. Build Docker image
       # =====================================================
+
       - name: Build production image
         run: docker build -t "$LOCAL_IMAGE" .
+
 
       # =====================================================
       # 7. Start API container
       # =====================================================
+
       - name: Start API container
         run: |
           docker run -d \
@@ -94,13 +113,16 @@ jobs:
             -e MONGO_URI="$MONGO_URI" \
             "$LOCAL_IMAGE"
 
+
       # =====================================================
       # 8. Check API + MongoDB health
       # =====================================================
+
       - name: Check API and MongoDB health
         shell: bash
         run: |
           for attempt in {1..30}; do
+
             if curl --fail --silent --show-error \
               --max-time 3 \
               http://127.0.0.1:3000/health \
@@ -122,80 +144,104 @@ jobs:
               "; then
 
                 echo "Healthcheck passed"
+
                 cat /tmp/product-health.json
+
                 exit 0
               fi
             fi
 
             echo "Waiting for API: attempt $attempt/30"
+
             sleep 2
           done
 
           echo "Healthcheck failed"
+
           exit 1
+
 
       # =====================================================
       # 9. Login Docker Hub
       # =====================================================
+
       - name: Login to Docker Hub
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
         run: |
           echo "$DOCKERHUB_TOKEN" | docker login \
             --username "$DOCKERHUB_USERNAME" \
             --password-stdin
 
+
       # =====================================================
       # 10. Push tested image to Docker Hub
       # =====================================================
+
       - name: Push tested image
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+
         run: |
           IMAGE="$DOCKERHUB_USERNAME/product-api"
 
           echo "Tagging image: $IMAGE"
 
           docker tag "$LOCAL_IMAGE" "$IMAGE:$GITHUB_SHA"
+
           docker tag "$LOCAL_IMAGE" "$IMAGE:latest"
 
           echo "Pushing image: $IMAGE:$GITHUB_SHA"
+
           docker push "$IMAGE:$GITHUB_SHA"
 
           echo "Pushing image: $IMAGE:latest"
+
           docker push "$IMAGE:latest"
+
 
       # =====================================================
       # 11. Show logs if CI fails
       # =====================================================
+
       - name: Show logs on failure
         if: failure()
         env:
           MONGO_CONTAINER_ID: ${{ job.services.mongodb.id }}
+
         run: |
           echo "===== Product API logs ====="
+
           docker logs product-api-ci || true
 
           echo "===== MongoDB logs ====="
+
           if [ -n "$MONGO_CONTAINER_ID" ]; then
             docker logs "$MONGO_CONTAINER_ID" || true
           fi
 
+
       # =====================================================
       # 12. Clean up CI API container
       # =====================================================
+
       - name: Clean up API container
         if: always()
+
         run: |
           docker rm -f product-api-ci || true
 
 
+
   # =========================================================
-  # CD: DEPLOY TO LOCAL DOCKER ENGINE
+  # CD
+  # DOCKER HUB -> LOCAL DOCKER ENGINE
   # =========================================================
+
   deploy-local:
     name: Deploy to local Docker Engine
 
@@ -221,28 +267,37 @@ jobs:
     env:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       IMAGE_TAG: ${{ github.sha }}
+
+      # Production dùng port 3001
       PORT: "3001"
+
 
     steps:
 
       # =====================================================
       # 1. Checkout deployment configuration
       # =====================================================
+
       - name: Checkout deployment configuration
         uses: actions/checkout@v6
+
         with:
           persist-credentials: false
+
 
       # =====================================================
       # 2. Check Docker Desktop
       # =====================================================
+
       - name: Check Docker Desktop
         run: |
+
           docker version
 
           if ($LASTEXITCODE -ne 0) {
             throw "Start Docker Desktop using the runner Windows account"
           }
+
 
           docker compose version
 
@@ -250,90 +305,135 @@ jobs:
             throw "Docker Compose v2 is required"
           }
 
+
           if (-not $env:DOCKERHUB_USERNAME) {
             throw "DOCKERHUB_USERNAME secret is required"
           }
 
+
       # =====================================================
-      # 3. Stop old Compose deployment
+      # 3. Stop old production Compose deployment
       #
-      # Does NOT remove MongoDB volume because we do NOT use -v
+      # Không dùng -v để giữ MongoDB volume
       # =====================================================
+
       - name: Stop existing production deployment
         run: |
+
           Write-Host "Stopping existing product-api-prod deployment..."
+
 
           docker compose `
             -p product-api-prod `
             -f docker-compose-prod.yaml `
             down --remove-orphans
 
+
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "Compose down returned a non-zero code. Continuing..."
+
+            Write-Host "Compose down returned a non-zero code."
+
+            Write-Host "Continuing deployment..."
+
           }
+
 
       # =====================================================
       # 4. Remove old standalone product-api container
       #
-      # Fixes:
-      # Conflict. The container name "/product-api"
-      # is already in use
+      # Không đụng product-api-dev
       # =====================================================
-      - name: Remove old product-api container
+
+      - name: Remove old standalone product-api container
         run: |
+
           $container = docker ps -aq --filter "name=^product-api$"
 
+
           if ($container) {
+
             Write-Host "Removing old product-api container: $container"
+
             docker rm -f $container
+
 
             if ($LASTEXITCODE -ne 0) {
               throw "Failed to remove old product-api container"
             }
+
           }
           else {
+
             Write-Host "No old standalone product-api container found."
+
           }
 
+
       # =====================================================
-      # 5. Check port 3000
+      # 5. Check production port
+      #
+      # Production = 3001
+      # Local Compose = 3000
       # =====================================================
-      - name: Check port 3000
+
+      - name: Check production port
         run: |
-          $port3000 = docker ps -q --filter "publish=3000"
 
-          if ($port3000) {
-            Write-Host "A container is still using port 3000:"
-            docker ps --filter "publish=3000"
+          $port = $env:PORT
 
-            throw "Port 3000 is still in use"
+
+          Write-Host "Checking production port: $port"
+
+
+          $containers = docker ps -q --filter "publish=$port"
+
+
+          if ($containers) {
+
+            Write-Host "A container is still using production port $port:"
+
+            docker ps --filter "publish=$port"
+
+
+            throw "Production port $port is still in use"
           }
 
-          Write-Host "Port 3000 is available."
+
+          Write-Host "Production port $port is available."
+
 
       # =====================================================
       # 6. Pull image published by this commit
       # =====================================================
+
       - name: Pull the image published by this commit
         run: |
+
           Write-Host "Pulling Docker image for commit:"
+
           Write-Host $env:IMAGE_TAG
+
 
           docker compose `
             -p product-api-prod `
             -f docker-compose-prod.yaml `
             pull
 
+
           if ($LASTEXITCODE -ne 0) {
             throw "Image pull failed"
           }
 
+
       # =====================================================
-      # 7. Start containers and require healthy status
+      # 7. Start production containers
       # =====================================================
+
       - name: Update containers and require healthy status
         run: |
+
           Write-Host "Starting production containers..."
+
 
           docker compose `
             -p product-api-prod `
@@ -342,75 +442,112 @@ jobs:
             --wait `
             --wait-timeout 180
 
+
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "Deployment failed. Showing logs..."
+
+            Write-Host "Deployment failed."
+
+            Write-Host "Showing deployment logs..."
+
 
             docker compose `
               -p product-api-prod `
               -f docker-compose-prod.yaml `
               logs --tail 100
 
+
             throw "Deployment or container healthcheck failed"
           }
 
+
           Write-Host "Docker Compose deployment succeeded."
 
+
       # =====================================================
-      # 8. Verify API health endpoint
+      # 8. Verify Product API health
+      #
+      # Sử dụng PORT=3001
       # =====================================================
+
       - name: Verify Product API health
         run: |
-          Write-Host "Checking http://127.0.0.1:3000/health ..."
+
+          $healthUrl = "http://127.0.0.1:$env:PORT/health"
+
+
+          Write-Host "Checking $healthUrl ..."
+
 
           $health = Invoke-RestMethod `
-            -Uri "http://127.0.0.1:3000/health" `
+            -Uri $healthUrl `
             -TimeoutSec 10
 
+
           Write-Host "API status: $($health.status)"
+
           Write-Host "Database status: $($health.database)"
+
 
           if (
             $health.status -ne "ok" -or
             $health.database -ne "connected"
           ) {
+
             throw "API cannot connect to MongoDB"
           }
 
-          Write-Host "API healthcheck passed."
+
+          Write-Host "Production API healthcheck passed."
+
 
       # =====================================================
-      # 9. Show deployed containers
+      # 9. Verify deployed containers
       # =====================================================
+
       - name: Verify deployed containers
         run: |
+
           docker compose `
             -p product-api-prod `
             -f docker-compose-prod.yaml `
             ps
 
+
           if ($LASTEXITCODE -ne 0) {
             throw "Cannot inspect deployed containers"
           }
 
+
           Write-Host ""
+
           Write-Host "Docker containers:"
+
+
           docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
 
       # =====================================================
       # 10. Show deployment logs on failure
       # =====================================================
+
       - name: Show deployment logs on failure
         if: failure()
+
         run: |
+
           Write-Host "===== Docker Compose logs ====="
+
 
           docker compose `
             -p product-api-prod `
             -f docker-compose-prod.yaml `
             logs --tail 100
 
+
           Write-Host ""
+
           Write-Host "===== Docker containers ====="
+
 
           docker ps -a `
             --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
