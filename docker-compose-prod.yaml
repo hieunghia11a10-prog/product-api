@@ -7,27 +7,45 @@ services:
     volumes:
       - mongo-data:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand({ping:1}).ok ? 0 : 1)"]
+      test:
+        [
+          "CMD",
+          "mongosh",
+          "--quiet",
+          "--eval",
+          "quit(db.adminCommand({ ping: 1 }).ok ? 0 : 1)"
+        ]
       interval: 5s
       timeout: 5s
       retries: 12
       start_period: 10s
 
   product-api:
+    container_name: product-api
     image: ${DOCKERHUB_USERNAME:?Set DOCKERHUB_USERNAME in .env}/product-api:${IMAGE_TAG:-latest}
     restart: unless-stopped
+
     ports:
       - "127.0.0.1:${PORT:-3000}:3000"
+
     environment:
       HOST: 0.0.0.0
       PORT: 3000
       NODE_ENV: production
       MONGO_URI: mongodb://nammongodb:27017/productdb
+
     depends_on:
       nammongodb:
         condition: service_healthy
+
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health', {signal: AbortSignal.timeout(3000)}).then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/health', {signal: AbortSignal.timeout(3000)}).then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
