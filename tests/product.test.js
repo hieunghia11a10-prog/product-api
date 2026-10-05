@@ -9,7 +9,7 @@ const uri = process.env.MONGO_URI;
 let databaseReady = false;
 
 beforeAll(async () => {
-  // Chỉ cho phép dọn dữ liệu trong database kiểm thử.
+  // Chỉ được dọn dữ liệu trong database kiểm thử.
   if (!uri || !uri.endsWith("/productdb_ci_test")) {
     throw new Error(
       "MONGO_URI phải trỏ đến database productdb_ci_test"
@@ -151,8 +151,9 @@ describe("Product API với MongoDB thật", () => {
     expect(saved).toMatchObject(sample);
   });
 
-  // Schema hiện tại không có min hoặc ràng buộc số nguyên.
+  // Schema không bắt buộc tên và không giới hạn số âm, số thập phân.
   test.each([
+    ["tên rỗng", { pname: "" }],
     ["giá âm", { price: -1 }],
     ["số lượng âm", { quantity: -1 }],
     ["số lượng thập phân", { quantity: 1.5 }],
@@ -171,8 +172,8 @@ describe("Product API với MongoDB thật", () => {
     expect(saved).toMatchObject(data);
   });
 
-  // Hai trường không bắt buộc.
-  test.each(["pid", "quantity"])(
+  // Ba trường không bắt buộc.
+  test.each(["pid", "pname", "price"])(
     "Cho phép tạo sản phẩm thiếu trường %s",
     async (field) => {
       const data = { ...sample };
@@ -194,30 +195,17 @@ describe("Product API với MongoDB thật", () => {
     }
   );
 
-  test("Từ chối tạo sản phẩm có tên rỗng", async () => {
+  test("Từ chối tạo sản phẩm thiếu quantity", async () => {
+    const data = { ...sample };
+    delete data.quantity;
+
     const response = await request(app)
       .post("/api/products")
-      .send({ ...sample, pname: "" });
+      .send(data);
 
     expect(response.statusCode).toBe(400);
     expect(await Product.countDocuments({})).toBe(0);
   });
-
-  // Hai trường bắt buộc.
-  test.each(["pname", "price"])(
-    "Từ chối tạo sản phẩm thiếu trường %s",
-    async (field) => {
-      const data = { ...sample };
-      delete data[field];
-
-      const response = await request(app)
-        .post("/api/products")
-        .send(data);
-
-      expect(response.statusCode).toBe(400);
-      expect(await Product.countDocuments({})).toBe(0);
-    }
-  );
 
   test("Từ chối tạo sản phẩm chỉ có pid", async () => {
     const response = await request(app)
@@ -231,7 +219,7 @@ describe("Product API với MongoDB thật", () => {
   test("Cho phép cập nhật giá âm và lưu thay đổi", async () => {
     await Product.create(sample);
 
-    // Route PUT yêu cầu đủ pname, price và quantity.
+    // Route PUT vẫn yêu cầu đủ pname, price và quantity.
     const changes = {
       pname: sample.pname,
       price: -1,
