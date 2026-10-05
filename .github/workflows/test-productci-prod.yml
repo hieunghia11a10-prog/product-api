@@ -221,7 +221,7 @@ jobs:
     env:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       IMAGE_TAG: ${{ github.sha }}
-      PORT: "3000"
+      PORT: "3001"
 
     steps:
 

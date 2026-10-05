@@ -22,7 +22,7 @@ services:
   product-api:
     build: .
     image: product-api:1.0
-    container_name: product-api
+    container_name: product-api-dev
     env_file:
       - .env.docker
     environment:
