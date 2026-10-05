@@ -1,4 +1,4 @@
-"name: Product CI CD
+name: Test Product CI Prod and CD
 
 on:
   push:
@@ -239,4 +239,3 @@ jobs:
       - name: Show deployment logs on failure
         if: failure()
         run: docker compose -p product-api-prod -f docker-compose-prod.yaml logs --tail 100
-"
