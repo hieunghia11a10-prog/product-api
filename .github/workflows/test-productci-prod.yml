@@ -144,20 +144,16 @@ jobs:
               "; then
 
                 echo "Healthcheck passed"
-
                 cat /tmp/product-health.json
-
                 exit 0
               fi
             fi
 
             echo "Waiting for API: attempt $attempt/30"
-
             sleep 2
           done
 
           echo "Healthcheck failed"
-
           exit 1
 
 
@@ -192,15 +188,12 @@ jobs:
           echo "Tagging image: $IMAGE"
 
           docker tag "$LOCAL_IMAGE" "$IMAGE:$GITHUB_SHA"
-
           docker tag "$LOCAL_IMAGE" "$IMAGE:latest"
 
           echo "Pushing image: $IMAGE:$GITHUB_SHA"
-
           docker push "$IMAGE:$GITHUB_SHA"
 
           echo "Pushing image: $IMAGE:latest"
-
           docker push "$IMAGE:latest"
 
 
@@ -215,7 +208,6 @@ jobs:
 
         run: |
           echo "===== Product API logs ====="
-
           docker logs product-api-ci || true
 
           echo "===== MongoDB logs ====="
@@ -231,10 +223,8 @@ jobs:
 
       - name: Clean up API container
         if: always()
-
         run: |
           docker rm -f product-api-ci || true
-
 
 
   # =========================================================
@@ -271,7 +261,6 @@ jobs:
       # Production dùng port 3001
       PORT: "3001"
 
-
     steps:
 
       # =====================================================
@@ -280,7 +269,6 @@ jobs:
 
       - name: Checkout deployment configuration
         uses: actions/checkout@v6
-
         with:
           persist-credentials: false
 
@@ -291,20 +279,17 @@ jobs:
 
       - name: Check Docker Desktop
         run: |
-
           docker version
 
           if ($LASTEXITCODE -ne 0) {
             throw "Start Docker Desktop using the runner Windows account"
           }
 
-
           docker compose version
 
           if ($LASTEXITCODE -ne 0) {
             throw "Docker Compose v2 is required"
           }
-
 
           if (-not $env:DOCKERHUB_USERNAME) {
             throw "DOCKERHUB_USERNAME secret is required"
@@ -313,91 +298,64 @@ jobs:
 
       # =====================================================
       # 3. Stop old production Compose deployment
-      #
-      # Không dùng -v để giữ MongoDB volume
       # =====================================================
 
       - name: Stop existing production deployment
         run: |
-
           Write-Host "Stopping existing product-api-prod deployment..."
-
 
           docker compose `
             -p product-api-prod `
             -f docker-compose-prod.yaml `
             down --remove-orphans
 
-
           if ($LASTEXITCODE -ne 0) {
-
             Write-Host "Compose down returned a non-zero code."
-
             Write-Host "Continuing deployment..."
-
           }
 
 
       # =====================================================
       # 4. Remove old standalone product-api container
-      #
-      # Không đụng product-api-dev
       # =====================================================
 
       - name: Remove old standalone product-api container
         run: |
-
           $container = docker ps -aq --filter "name=^product-api$"
 
-
           if ($container) {
-
             Write-Host "Removing old product-api container: $container"
 
             docker rm -f $container
 
-
             if ($LASTEXITCODE -ne 0) {
               throw "Failed to remove old product-api container"
             }
-
           }
           else {
-
             Write-Host "No old standalone product-api container found."
-
           }
 
 
       # =====================================================
       # 5. Check production port
-      #
-      # Production = 3001
-      # Local Compose = 3000
       # =====================================================
 
       - name: Check production port
         run: |
-
           $port = $env:PORT
-
 
           Write-Host "Checking production port: $port"
 
-
           $containers = docker ps -q --filter "publish=$port"
 
-
           if ($containers) {
-
-            Write-Host "A container is still using production port $port:"
+            Write-Host "A container is still using production port ${port}:"
 
             docker ps --filter "publish=$port"
 
-
-            throw "Production port $port is still in use"
+            throw "Production port ${port} is still in use"
           }
-
 
           Write-Host "Production port $port is available."
 
@@ -408,17 +366,13 @@ jobs:
 
       - name: Pull the image published by this commit
         run: |
-
           Write-Host "Pulling Docker image for commit:"
-
           Write-Host $env:IMAGE_TAG
-
 
           docker compose `
             -p product-api-prod `
             -f docker-compose-prod.yaml `
             pull
-
 
           if ($LASTEXITCODE -ne 0) {
             throw "Image pull failed"
@@ -431,9 +385,7 @@ jobs:
 
       - name: Update containers and require healthy status
         run: |
-
           Write-Host "Starting production containers..."
-
 
           docker compose `
             -p product-api-prod `
@@ -442,60 +394,44 @@ jobs:
             --wait `
             --wait-timeout 180
 
-
           if ($LASTEXITCODE -ne 0) {
-
             Write-Host "Deployment failed."
-
             Write-Host "Showing deployment logs..."
-
 
             docker compose `
               -p product-api-prod `
               -f docker-compose-prod.yaml `
               logs --tail 100
 
-
             throw "Deployment or container healthcheck failed"
           }
-
 
           Write-Host "Docker Compose deployment succeeded."
 
 
       # =====================================================
       # 8. Verify Product API health
-      #
-      # Sử dụng PORT=3001
       # =====================================================
 
       - name: Verify Product API health
         run: |
-
           $healthUrl = "http://127.0.0.1:$env:PORT/health"
 
-
           Write-Host "Checking $healthUrl ..."
-
 
           $health = Invoke-RestMethod `
             -Uri $healthUrl `
             -TimeoutSec 10
 
-
           Write-Host "API status: $($health.status)"
-
           Write-Host "Database status: $($health.database)"
-
 
           if (
             $health.status -ne "ok" -or
             $health.database -ne "connected"
           ) {
-
             throw "API cannot connect to MongoDB"
           }
-
 
           Write-Host "Production API healthcheck passed."
 
@@ -506,22 +442,17 @@ jobs:
 
       - name: Verify deployed containers
         run: |
-
           docker compose `
             -p product-api-prod `
             -f docker-compose-prod.yaml `
             ps
 
-
           if ($LASTEXITCODE -ne 0) {
             throw "Cannot inspect deployed containers"
           }
 
-
           Write-Host ""
-
           Write-Host "Docker containers:"
-
 
           docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
@@ -532,22 +463,16 @@ jobs:
 
       - name: Show deployment logs on failure
         if: failure()
-
         run: |
-
           Write-Host "===== Docker Compose logs ====="
-
 
           docker compose `
             -p product-api-prod `
             -f docker-compose-prod.yaml `
             logs --tail 100
 
-
           Write-Host ""
-
           Write-Host "===== Docker containers ====="
-
 
           docker ps -a `
             --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
