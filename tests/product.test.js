@@ -71,7 +71,7 @@ describe("Product API với MongoDB thật", () => {
   // CREATE
   // =========================================================
 
-  test("CREATE: tạo và lưu sản phẩm", async () => {
+  test("POST: tạo và lưu sản phẩm", async () => {
     const response = await request(app)
       .post("/api/products")
       .send(sample);
@@ -92,7 +92,7 @@ describe("Product API với MongoDB thật", () => {
   // READ
   // =========================================================
 
-  test("READ: lấy danh sách sản phẩm", async () => {
+  test("GET: lấy danh sách sản phẩm", async () => {
     await Product.create(sample);
 
     const response = await request(app)
@@ -104,7 +104,7 @@ describe("Product API với MongoDB thật", () => {
   });
 
 
-  test("READ: lấy sản phẩm theo pid", async () => {
+  test("GET: lấy sản phẩm theo pid", async () => {
     await Product.create(sample);
 
     const response = await request(app)
@@ -119,7 +119,7 @@ describe("Product API với MongoDB thật", () => {
   // UPDATE
   // =========================================================
 
-  test("UPDATE: cập nhật và lưu thay đổi", async () => {
+  test("PUT: cập nhật và lưu thay đổi", async () => {
     await Product.create(sample);
 
     const changes = {
