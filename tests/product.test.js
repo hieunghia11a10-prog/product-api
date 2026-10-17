@@ -359,8 +359,3 @@ test('GET sản phẩm không tồn tại tra ve 404', async () => {
   expect(res.statusCode).toBe(404);
 });
 
-test('Post san pham', async () => {
-  const res = await request(app)
-    .post('/api/products')
-
-})
